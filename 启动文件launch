@@ -1,0 +1,44 @@
+运行VINS，需要启动launch文件与yaml文件，本文主要讲述这两个文件的内容、调整参数的方式等。
+一、launch文件：
+启动代码为：
+source wrappers/ros/devel/setup.bash
+roslaunch mynt_eye_ros_wrapper mynteye.launch
+vins正常工作需要三个节点：feature_tracker、vins_estimator、pose_graph，vins启动时，读取启动文件.launch，同时打开这三个节点。
+launch文件：提供的一个管理启动节点的途径，指定和配置需要使用的节点，通常保存在launch文件目录下。
+格式：以<launch>kaitou，</launch>结尾
+
+<node>:启动节点
+<param>：设置ROS系统运行的参数，存储在参数服务器中
+<rosparam>：加载参数文件中的多个参数
+<arg>：launch文件内部的局部变量，仅限于launch文件使用
+
+中间为    
+1、#设置局部变量config_path，表示配置文件mynteye_s2110_config.yaml的地址
+  #设置局部变量vins_path，在parameters.cpp中使用鱼眼相机mask中用到
+    <arg name="config_path" default = "$(find feature_tracker)/../config/mynteye/mynteye_s2110_config.yaml" />
+      <arg name="vins_path" default = "$(find feature_tracker)/../config/../" />
+      
+2、#启动feature_tracker节点，在该节点中需要读取参数文件，地址为config_file，即config_path；
+    <node name="feature_tracker" pkg="feature_tracker" type="feature_tracker" output="screen">
+        <param name="config_file" type="string" value="$(arg config_path)" />
+        <param name="vins_folder" type="string" value="$(arg vins_path)" />
+    </node>
+
+3、#启动"vins_estimator"节点，内容同上；
+    <node name="vins_estimator" pkg="vins_estimator" type="vins_estimator" output="screen">
+       <param name="config_file" type="string" value="$(arg config_path)" />
+       <param name="vins_folder" type="string" value="$(arg vins_path)" />
+    </node>
+4、#启动"pose_graph"节点，除了参数配置文件的地址外还设置了4个参数：
+   <node name="pose_graph" pkg="pose_graph" type="pose_graph" output="screen">
+        <param name="config_file" type="string" value="$(arg config_path)" />
+#visualization_shift_x和visualization_shift_y表示在进行位姿图优化后，对得到的位姿在x坐标和y坐标的偏移量（一般都设为0）；
+        <param name="visualization_shift_x" type="int" value="0" />
+        <param name="visualization_shift_y" type="int" value="0" />
+#skip_cnt在pose_graph_node的process()中，表示每隔skip_cnt个图像帧才进行一次处理；
+#skip_dis也在pose_graph_node的process()中，目的是将距上一帧的时间间隔超过SKIP_DIS的图像创建为位姿图中的关键帧。
+        <param name="skip_cnt" type="int" value="0" />
+        <param name="skip_dis" type="double" value="0" />
+    </node>
+5#启动rviz可视化界面，局部变量为vins_rviz_config.rviz的地址。
+    <node name="rvizvisualisation" pkg="rviz" type="rviz" output="log" args="-d $(find vins_estimator)/../config/vins_rviz_config.rviz" />
