@@ -1,0 +1,75 @@
+一、通用参数设置：
+1、订阅IMU和图像的topic：
+    image_topic在节点/fature_tracker中被订阅，以进行角点的光流跟踪；
+    imu_topic在节点/vins_estimator中被订阅，以进行IMU预积分。
+2、output_path为输出文件的地址，输出以下内容：
+    VINS的运行轨迹"/vins_result_no_loop.csv"与"/vins_result_loop.csv"，（如何禁止回环检测？？）
+    相机与IMU的外参估计 “/extrinsic_parameter.csv”（如果estimate_extrinsic不为0即需要对外参进行估计的话）。
+    如果该文件夹不存在则不输出。
+二、相机的信息
+model_type: KANNALA_BRANDT
+畸变模型：理想图像平面到真实图像平面的变换模型, 也就是Normalize平面上的畸变模型. 
+采用鱼眼畸变模型KANNALA_BRANDT，此外还有radtan畸变模型、FOV畸变模型等；
+Unified Projection Model或者MEI model, 其实就是Omnidirectional相机模型+radtan畸变模型
+
+camera_name: kannala-brandt
+相机模型：针孔相机模型(Pinhole)、全向模型(Omnidirectional)
+image_width: 640
+image_height: 400
+图像的宽和高
+相机的畸变系数（如果是鱼眼相机还要求mu、mv、u0、v0）、相机的内参。
+
+#相机的畸变系数
+projection_parameters:
+   k2: 5.2439847110591131e-01
+   k3: 3.2689444067913648e-01
+   k4: -7.6332452770569170e-01
+   k5: 3.3483575748734939e-01
+   mu: 1.9999833168166987e+02
+   mv: 2.0003418802231107e+02
+   u0: 3.0697887229339136e+02
+   v0: 1.9917771692957720e+02
+   
+三、imu和相机之间的外参
+    这里需要注意的是其旋转矩阵ric、平移向量tic都是表示从camera坐标系到IMU坐标系的变换。
+    需要精准：设置为0/1，最好进行手眼标定。
+    使用Kalibr工具进行IMU和相机的离线外参标定。
+    
+四、在节点/feature_traker中需要用到的参数
+1）max_cnt为进行特征光流跟踪时保持的特征点数量，具体在FeatureTracker::readImage()，
+  通过当前帧成功跟踪的特征点数，计算是否需要提取新的特征点，如果需要则用过goodFeaturesToTrack()提取。
+  max_cnt值增大在一定条件下会提高跟踪的鲁棒性（但在环境特征本来就不丰富的地方反而会提取不够鲁棒的特征点），但是会增加之后所有算法的运算时间
+2）min_dist为两个相邻特征之间像素的最小间隔，目的是保证图像中均匀的特征分布。
+  在FeatureTracker::setMask()中应用，该函数的作用是对跟踪点进行排序并去除密集点。
+  min_dist的实现原理是在mask中将当前特征点周围半径为MIN_DIST的区域设置为0，后面便不再选取该区域内的点。
+3）freq控制图像跟踪的发布频率。在回调函数img_callback()中应用，通过判断判断间隔时间内的发布次数控制发布频率。
+  一般根据相机的运行速度以及其他参数调完后的实时运行情况进行调整。
+4）F_threshold为ransac算法的门限值，在FeatureTracker::rejectWithF()通过计算基本矩阵去除图像特征跟踪的外点时使用，一般不修改。
+5）show_track：将经过特征跟踪的图像进行发布，需要。
+6）equalize: 如果图像整体太暗或者太亮则需要进行直方图均衡化，在FeatureTracker::readImage()中进行自适应直方图均衡化，需要。
+7）fisheye：鱼眼相机一般需要圆形的mask，以去除外部噪声点。mask图在config文件夹中。
+
+五、在节点/vins_estimator中需要用到的参数
+max_solver_time和max_num_iterations分别定义了ceres优化器的最大迭代时间和最大迭代次数，以保证实时性。
+在Estimator::optimization()中使用，并根据不同的边缘化方案而有改变。
+
+keyframe_parallax定义了关键帧的选择阈值。
+在FeatureManager::addFeatureCheckParallax()中通过计算每一个点跟踪次数和它在次新帧和次次新帧间的视差确定是否是关键帧。这个参数影响着算法中关键帧的个数。
+其中keyframe_parallax为像素坐标系，MIN_PARALLAX为归一化相机坐标系。
+
+六、IMU参数
+包括加速度计和陀螺仪测量值的噪声标准差和随机偏置的导数标准差，以及重力加速度大小。
+因为在进行IMU预积分时我们假设传感器的噪声noise服从高斯分布，偏置bias的导数服从高斯分布。
+
+七、闭环用到的参数
+load_previous_pose_graph 为新功能：地图重用，通过载入先前的位姿图文件实现。
+fast_relocalization常用于高实时性或者地图非常大、持续时间长的地方，得到的结果精度会降低。一般实验时先不打开。
+
+八、在线时差校准、支持卷帘相机、可视化
+
+总结：
+拿到一个新的相机-IMU组件，在安装对应的驱动和ROS包后，首先需要对yaml文件的传感器信息部分进行以下修改
+1、确定相机和IMU各自发布的topic；
+2、标定相机、IMU的内参，从相机到IMU的外参；
+3、是否是硬件时间同步，如果不是的话需要进行在线同步时差估计；
+4、相机是卷帘曝光还是全局曝光。
